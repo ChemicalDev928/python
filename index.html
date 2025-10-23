@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Interactive Marks Predictor</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; }
+    input, button { margin: 5px; padding: 8px; }
+    #train-section, #predict-section { margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <h1>📘 Marks Predictor</h1>
+
+  <div id="train-section">
+    <h2>Step 1: Train the Model</h2>
+    <p>Enter training data (Hours studied and Marks scored):</p>
+    <div id="training-data">
+      <input type="number" placeholder="Hours" class="hours">
+      <input type="number" placeholder="Marks" class="marks">
+    </div>
+    <button onclick="addRow()">➕ Add Row</button>
+    <button onclick="trainModel()">🚀 Train Model</button>
+    <p id="train-status"></p>
+  </div>
+
+  <div id="predict-section">
+    <h2>Step 2: Predict Marks</h2>
+    <input id="hours" type="number" placeholder="Enter hours to predict">
+    <button onclick="predict()">Predict</button>
+    <p id="result"></p>
+  </div>
+
+  <script>
+    // Add more input rows
+    function addRow() {
+      const container = document.getElementById('training-data');
+      const hoursInput = document.createElement('input');
+      const marksInput = document.createElement('input');
+      hoursInput.placeholder = 'Hours';
+      hoursInput.type = 'number';
+      hoursInput.className = 'hours';
+      marksInput.placeholder = 'Marks';
+      marksInput.type = 'number';
+      marksInput.className = 'marks';
+      container.appendChild(document.createElement('br'));
+      container.appendChild(hoursInput);
+      container.appendChild(marksInput);
+    }
+
+    // Train the model
+    async function trainModel() {
+      const hours = [...document.getElementsByClassName('hours')].map(i => parseFloat(i.value));
+      const marks = [...document.getElementsByClassName('marks')].map(i => parseFloat(i.value));
+
+      const response = await fetch('http://127.0.0.1:5000/train', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ X: hours, y: marks })
+      });
+
+      const data = await response.json();
+      document.getElementById('train-status').innerText = data.message || data.error;
+    }
+
+    // Predict new value
+    async function predict() {
+      const hours = document.getElementById('hours').value;
+
+      const response = await fetch('http://127.0.0.1:5000/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hours: hours })
+      });
+
+      const data = await response.json();
+      document.getElementById('result').innerText =
+        data.predicted_marks ? `Predicted Marks: ${data.predicted_marks}` : `Error: ${data.error}`;
+    }
+  </script>
+</body>
+</html>
