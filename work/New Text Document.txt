@@ -1,0 +1,144 @@
+import boto3
+import time
+import json
+import re
+
+BUCKET_NAME = "razin-textract-bucket-867927867048"
+DOCUMENT_NAME = "sample.pdf"
+REGION = "us-east-1"
+
+textract = boto3.client("textract", region_name=REGION)
+
+response = textract.start_document_analysis(
+    DocumentLocation={"S3Object": {"Bucket": BUCKET_NAME, "Name": DOCUMENT_NAME}},
+    FeatureTypes=["TABLES", "FORMS"]
+)
+job_id = response["JobId"]
+
+while True:
+    result = textract.get_document_analysis(JobId=job_id)
+    status = result["JobStatus"]
+    print("Job status:", status)
+    if status in ["SUCCEEDED", "FAILED"]:
+        break
+    time.sleep(5)
+
+if status != "SUCCEEDED":
+    print("❌ Textract job failed.")
+    exit()
+
+all_blocks = []
+next_token = None
+while True:
+    if next_token:
+        result = textract.get_document_analysis(JobId=job_id, NextToken=next_token)
+    all_blocks.extend(result["Blocks"])
+    next_token = result.get("NextToken")
+    if not next_token:
+        break
+
+chain_list = change_list = ["Comments"]
+
+for i, block in enumerate(all_blocks):
+    if block["BlockType"] == "LINE" and block.get("Text") in change_list:
+        # Find next line after 'Comments'
+        for j in range(i + 1, len(all_blocks)):
+            next_block = all_blocks[j]
+            if next_block["BlockType"] == "LINE":
+                print("=======================")
+                print(f"{next_block['Text']}")
+                print("=======================")
+                break
+
+lines = [block["Text"] for block in all_blocks if block["BlockType"] == "LINE" and "Text" in block]
+
+between1_start_idx = between1_end_idx = freight_terms = None
+
+between2_start_idx = between2_end_idx = None
+stop_list = []
+
+for i, text in enumerate(lines):
+    lower_text = text.lower().strip()
+
+    if "special instructions" in lower_text and between1_start_idx is None:
+        between1_start_idx = i
+    if "equipment & services" in lower_text and between1_end_idx is None:
+        between1_end_idx = i
+    if "stop" in lower_text and text not in stop_list :
+        stop_list.append((text, i))
+    if "stop 1" in lower_text and between2_start_idx is None:
+        between2_start_idx = i
+    if "stop 2" in lower_text and between2_end_idx is None:
+        between2_end_idx = i
+    if "freight terms" in lower_text and freight_terms is None:
+        freight_terms = i
+
+if between1_start_idx is not None and between1_end_idx is not None and between1_start_idx < between1_end_idx:
+    between_lines = lines[between1_start_idx + 1:between1_end_idx]
+    if between_lines:
+        print("=======================")
+        for line in between_lines:
+            print(line)
+        print("=======================")
+
+for stop in enumerate(stop_list):
+
+    print("=======================")
+    # print(len(lines), stop[1][1])
+
+    if stop[1][1] < len(lines):
+        print(f"Time: {lines[stop[1][1] + 1]}")
+
+        # Extract clean phone
+        raw_phone_line = lines[stop[1][1] + 2]
+        match = re.search(r"\(?\d{3}\)?[ -]?\d{3}-\d{4}", raw_phone_line)
+        if match:
+            phone_number = match.group(0)
+            print(f"Phone: {phone_number}")
+        else:
+            print(f"Phone: {raw_phone_line}")
+        
+        # Address
+        address_line = lines[stop[1][1] + 3]
+        address_parts = [part.strip() for part in address_line.split(",") if part.strip()]
+        for idx, address in enumerate(address_parts, start=1):
+            print(f"{idx}: {address}")
+        print(f"{lines[stop[1][1] + 4]}")
+        selected_lines = lines[stop[1][1]:len(lines)]
+        commnet_number = 0
+        for i, text in enumerate(selected_lines, start=stop[1][1]):
+            if "Items" in text:
+                commnet_number = i - stop[1][1] - 1
+        print(f"Comment: {lines[stop[1][1] + commnet_number]}")
+        print(f"{lines[stop[1][1] + commnet_number+7]}")
+    else:
+        print(f"❌ Only {len(lines)} lines available.")
+    print("=======================")
+
+if (
+    freight_terms is not None
+    and len(lines) is not None
+    and freight_terms < len(lines)
+):
+    between_lines = lines[freight_terms + 1 : len(lines)]
+    if between_lines:
+        print("=======================")
+        match_1 = re.search(r"\d+(\.\d+)?", lines[freight_terms+6])
+        match_2 = re.search(r"\d+(\.\d+)?", lines[freight_terms+9])
+        if match_1:
+            number = match_1.group(0)
+            print(number)
+        else:
+            print("❌ No number found.")
+        print("=======================")
+        if match_2:
+            number = match_2.group(0)
+            print(number)
+        else:
+            print("❌ No number found.")
+        print("=======================")
+
+with open("textract_output.json", "w", encoding="utf-8") as f:
+     json.dump(all_blocks, f, ensure_ascii=False, indent=2)
+
+print("\n💾 Saved full Textract result to 'textract_output.json'")
